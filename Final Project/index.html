@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ball It!</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            justify-content: flex-end;
+            align-items: flex-start;
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.7/dat.gui.min.js"></script>
+    <script>
+        const keyMap = {};
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 1, 100);
+        const renderer = new THREE.WebGLRenderer();
+        
+        const initialCameraOffset = new THREE.Vector3(0, 5, 5);
+        const cameraTarget = new THREE.Vector3();
+        const cameraControls = {
+            cameraDistance: 5,   
+            minDistance: 3,      
+            maxDistance: 10,     
+            zoomSpeed: 0.1     
+        };
+        
+        const sphereMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0xffffff, 
+            metalness: 0.5, 
+            roughness: 0.2,
+            opacity: 1.0,
+            transparent: false
+        });
+        const sphere = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 64), sphereMaterial);
+        const originalSphereHeight = sphere.geometry.parameters.radius;
+        
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        const lightBulb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.05, 32, 32),
+        new THREE.MeshBasicMaterial({ color: 0xffffee})
+        );
+        
+        const pointLight = new THREE.PointLight(0xffffff, 1, 10);
+        pointLight.castShadow = true;
+        
+        const q = new THREE.Quaternion();
+        const angularVelocity = new THREE.Vector3();
+        const currentDirection = new THREE.Vector3();
+        const jumpDirection = new THREE.Vector3();
+        const clock = new THREE.Clock();
+        let delta = 0;
+        const v0 = new THREE.Vector3();
+        const g = 9.8;
+        const jumpPower = 4;
+        let isJumping = false;
+        let jumpStart = 0;
+        let initialJumpSpeed = 0;
+        let orbitAngle = 0;
+        
+        const floorGeometry = new THREE.PlaneGeometry(250, 250);
+        const textureLoader = new THREE.TextureLoader();
+        const floorMat = new THREE.MeshStandardMaterial({
+            roughness: 0.8,
+            color: 0xffffff,
+            metalness: 0.2,
+            bumpScale: 1
+        });
+        const floorMesh = new THREE.Mesh(floorGeometry, floorMat);
+        
+        textureLoader.load('https://threejs.org/examples/textures/hardwood2_diffuse.jpg', function(map) {
+            map.wrapS = THREE.RepeatWrapping;
+            map.wrapT = THREE.RepeatWrapping;
+            map.anisotropy = 4;
+            map.repeat.set(20, 48);
+            map.encoding = THREE.sRGBEncoding;
+            floorMat.map = map;
+            floorMat.needsUpdate = true;
+            floorMesh.rotation.x = -Math.PI / 2.0;
+            floorMesh.receiveShadow = true;
+            scene.add(floorMesh);
+        });
+        
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+        scene.add(sphere);
+        scene.add(ambientLight);
+        scene.add(floorMesh);
+        scene.add(pointLight);
+        scene.add(lightBulb);
+        
+        const gui = new dat.GUI();
+        
+        let lightControls = {
+            intensity: 1,
+            height: 3, 
+            orbitRadius: 0, 
+            orbitSpeed: 0.01, 
+            diffusion: 10,
+            intermittent: false,
+            pulsationSpeed: 1, 
+            updateLightPosition: function() {
+                lightBulb.position.y = lightControls.height;
+                pointLight.position.copy(lightBulb.position);
+            }
+        };
+        
+        // Light controls and added to GUI
+        const lightFolder = gui.addFolder('Light Controls');
+        lightFolder.add(lightControls, 'intensity', 0, 10).onChange(function(value) {
+            pointLight.intensity = value;
+        });
+        lightFolder.add(lightControls, 'height', 3, 10).onChange(function(value) {
+            lightControls.updateLightPosition();
+        });
+        lightFolder.add(lightControls, 'orbitRadius', 0, 10).name('Orbit Radius');
+        lightFolder.add(lightControls, 'orbitSpeed', 0, 0.2).name('Orbit Speed');
+        lightFolder.add(lightControls, 'diffusion', 1, 100).onChange(function(value) {
+            pointLight.distance = value;
+        }).name('Diffusion');
+        lightFolder.add(lightControls, 'intermittent').name('Intermittent');
+        lightFolder.add(lightControls, 'pulsationSpeed', 0.0, 5).name('Pulsation Speed');
+        
+        // Sphere controls     
+        const sphereControls = {
+            loadTexture: function() {
+                textureLoader.load('/Image/metal.jpg', function(texture) {
+                    texture.wrapS = THREE.RepeatWrapping;
+                    texture.wrapT = THREE.RepeatWrapping;
+                    texture.anisotropy = 4;
+                    texture.repeat.set(1, 1);
+                    sphereMaterial.map = texture;
+                    sphereMaterial.needsUpdate = true;
+                });
+            },
+            removeTexture: function() {
+                sphereMaterial.map = null;
+                sphereMaterial.needsUpdate = true;
+            },
+            loadBumpTexture: function() {
+                textureLoader.load('/Image/carbon_fiber.jpg', function(texture) {
+                    texture.wrapS = THREE.RepeatWrapping;
+                    texture.wrapT = THREE.RepeatWrapping;
+                    texture.anisotropy = 4;
+                    texture.repeat.set(1, 1);
+                    sphereMaterial.bumpMap = texture;
+                    sphereMaterial.needsUpdate = true;
+                });
+            },
+            removeBumpTexture: function() {
+                sphereMaterial.bumpMap = null;
+                sphereMaterial.needsUpdate = true;
+            },
+            metalness: 0.5,
+            opacity: 1.0, 
+            sphereScale: 1.0, 
+            
+            setOpacity: function(value) {
+                sphereMaterial.opacity = value;
+                sphereMaterial.transparent = value < 1.0;
+                sphereMaterial.needsUpdate = true;
+            },
+            updateSphereScale: function(value) {
+                sphere.scale.set(value, value, value);
+                sphere.position.y = originalSphereHeight * value; // Update sphere position
+            }
+        };
+        
+        // Add sphere controls to GUI
+        const sphereFolder = gui.addFolder('Sphere Controls');
+        sphereFolder.add(sphereControls, 'loadTexture').name('Load Texture');
+        sphereFolder.add(sphereControls, 'removeTexture').name('Remove Texture');
+        sphereFolder.add(sphereControls, 'loadBumpTexture').name('Load Bump Texture');
+        sphereFolder.add(sphereControls, 'removeBumpTexture').name('Remove Bump Texture');
+        sphereFolder.add(sphereControls, 'metalness', 0, 1).step(0.01).onChange(function(value) {
+            sphereMaterial.metalness = value;
+        }).name('Sphere Metalness');
+        sphereFolder.add(sphereControls, 'opacity', 0, 1).step(0.01).onChange(function(value) {
+            sphereControls.setOpacity(value);
+        }).name('Sphere Opacity');
+        sphereFolder.add(sphereControls, 'sphereScale', 0.1, 2).step(0.1).onChange(function(value) {
+            sphereControls.updateSphereScale(value);
+        }).name('Sphere Scale');
+        
+        
+        // Add floor controls 
+        const floorControls = {
+            removeBumpTexture: function() {
+                floorMat.bumpMap = null;
+                floorMat.needsUpdate = true;
+            },
+            addBumpTexture: function() {
+                textureLoader.load('https://threejs.org/examples/textures/hardwood2_bump.jpg', function(map) {
+                    map.wrapS = THREE.RepeatWrapping;
+                    map.wrapT = THREE.RepeatWrapping;
+                    map.anisotropy = 4;
+                    map.repeat.set(10, 24);
+                    floorMat.bumpMap = map;
+                    floorMat.needsUpdate = true;
+                });
+            },
+            removeRoughnessTexture: function() {
+                floorMat.roughnessMap = null;
+                floorMat.needsUpdate = true;
+            },
+            addRoughnessTexture: function() {
+                textureLoader.load('https://threejs.org/examples/textures/hardwood2_roughness.jpg', function(map) {
+                    map.wrapS = THREE.RepeatWrapping;
+                    map.wrapT = THREE.RepeatWrapping;
+                    map.anisotropy = 4;
+                    map.repeat.set(10, 24);
+                    floorMat.roughnessMap = map;
+                    floorMat.needsUpdate = true;
+                });
+            }
+        };
+        
+        // Add floor controls to GUI
+        const floorFolder = gui.addFolder('Floor Controls');
+        floorFolder.add(floorControls, 'addBumpTexture').name('Add Bump Texture');
+        floorFolder.add(floorControls, 'removeBumpTexture').name('Remove Bump Texture');
+        floorFolder.add(floorControls, 'addRoughnessTexture').name('Add Roughness Texture');
+        floorFolder.add(floorControls, 'removeRoughnessTexture').name('Remove Roughness Texture');
+        
+        // Add camera controls to GUI
+        const cameraFolder = gui.addFolder('Camera Controls');
+        cameraFolder.add(cameraControls, 'cameraDistance', cameraControls.minDistance, cameraControls.maxDistance)
+        .onChange(function(value) {
+            updateCameraPosition(value);
+        }).name('Camera Distance');
+        
+        //Animations function
+        function animate() {
+            
+            requestAnimationFrame(animate);
+            delta = clock.getDelta();
+            
+            if (isJumping) {
+                let t = clock.getElapsedTime() - jumpStart;
+                let jumpHeight = initialJumpSpeed * t - 0.5 * g * t * t;
+                if (jumpHeight <= 0) {
+                    isJumping = false;
+                    sphere.position.y = originalSphereHeight * sphere.scale.y;
+                } else {
+                    sphere.position.y = originalSphereHeight * sphere.scale.y + jumpHeight; // Maintain above the floor height
+                }
+                if (!jumpDirection.equals(new THREE.Vector3(0, 0, 0))) {
+                    const rotationAxis = new THREE.Vector3().copy(angularVelocity).normalize();
+                    q.setFromAxisAngle(rotationAxis, delta * initialJumpSpeed * 0.5).normalize();
+                    sphere.applyQuaternion(q);
+                }
+                
+                const jumpDirectionScaled = jumpDirection.clone().multiplyScalar(initialJumpSpeed * 0.5);
+                sphere.position.add(jumpDirectionScaled.multiplyScalar(delta));
+            } else {
+                if (keyMap['KeyW']) {
+                    angularVelocity.x -= delta * 5;
+                }
+                if (keyMap['KeyS']) {
+                    angularVelocity.x += delta * 5;
+                }
+                if (keyMap['KeyA']) {
+                    angularVelocity.z += delta * 5;
+                }
+                if (keyMap['KeyD']) {
+                    angularVelocity.z -= delta * 5;
+                }
+                
+                q.setFromAxisAngle(angularVelocity, delta).normalize();
+                sphere.applyQuaternion(q);
+                angularVelocity.lerp(v0, 0.01);
+                
+                const moveDirection = new THREE.Vector3(angularVelocity.z, 0, -angularVelocity.x);
+                floorMesh.position.add(moveDirection.multiplyScalar(delta));
+            }
+            
+            // Update light position based on orbit
+            orbitAngle += lightControls.orbitSpeed;
+            lightBulb.position.x = sphere.position.x + lightControls.orbitRadius * Math.cos(orbitAngle);
+            lightBulb.position.z = sphere.position.z + lightControls.orbitRadius * Math.sin(orbitAngle);
+            lightBulb.position.y = sphere.position.y + lightControls.height;
+            pointLight.position.copy(lightBulb.position);
+            
+            // Intermittent effect
+            if (lightControls.intermittent) {
+                const elapsed = clock.getElapsedTime();
+                pointLight.intensity = lightControls.intensity * (0.5 + 0.5 * Math.sin(elapsed * lightControls.pulsationSpeed));
+            }
+            
+            const desiredPosition = sphere.position.clone().add(initialCameraOffset.clone().normalize().multiplyScalar(cameraControls.cameraDistance));
+            camera.position.lerp(desiredPosition, 0.15);
+            camera.lookAt(sphere.position);
+            
+            renderer.render(scene, camera);
+        }
+        
+        function updateCameraPosition(distance) {
+            const direction = new THREE.Vector3();
+            camera.position.sub(sphere.position);  // Posizione relativa alla sfera
+            direction.copy(camera.position).normalize().multiplyScalar(distance);
+            camera.position.copy(direction.add(sphere.position));
+        }
+        
+        function jump() {
+            if (!isJumping) {
+                isJumping = true;
+                jumpStart = clock.getElapsedTime();
+                currentDirection.set(angularVelocity.x, 0, angularVelocity.z).normalize();
+                if (currentDirection.length() === 0 || angularVelocity.length() < 0.1) {
+                    jumpDirection.set(0, 0, 0); 
+                } else {
+                    jumpDirection.set(-currentDirection.z, 0, currentDirection.x).normalize();
+                }
+                const velocityFactor = angularVelocity.length();
+                initialJumpSpeed = jumpPower + velocityFactor * 0.5;
+            }
+        }
+        
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        const onDocumentKey = (e) => {
+            keyMap[e.code] = e.type === 'keydown';
+            
+            if (e.code === 'Space' && e.type === 'keydown') {
+                jump();
+                e.preventDefault();
+            }
+        };
+        document.addEventListener('keydown', onDocumentKey, false);
+        document.addEventListener('keyup', onDocumentKey, false);
+        
+        // Set the initial position of the sphere above the floor
+        //Set shadows
+        sphere.position.set(0, originalSphereHeight, 0);
+        renderer.shadowMap.enabled = true; 
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        sphere.castShadow = true;
+        sphere.receiveShadow = true;
+        floorMesh.receiveShadow = true;
+        
+        animate();
+        
+    </script>
+</body>
+</html>
