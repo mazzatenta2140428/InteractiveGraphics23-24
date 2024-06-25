@@ -23,7 +23,7 @@
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 1, 100);
         const renderer = new THREE.WebGLRenderer();
-        
+
         const initialCameraOffset = new THREE.Vector3(0, 5, 5);
         const cameraTarget = new THREE.Vector3();
         const cameraControls = {
@@ -35,10 +35,11 @@
         
         const sphereMaterial = new THREE.MeshStandardMaterial({ 
             color: 0xffffff, 
-            metalness: 0.5, 
-            roughness: 0.2,
+            metalness: 0, 
+            roughness: 0,
             opacity: 1.0,
-            transparent: false
+            transparent: false,
+            emissive: 0x00000,
         });
         const sphere = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 64), sphereMaterial);
         const originalSphereHeight = sphere.geometry.parameters.radius;
@@ -46,7 +47,7 @@
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
         const lightBulb = new THREE.Mesh(
         new THREE.SphereGeometry(0.05, 32, 32),
-        new THREE.MeshBasicMaterial({ color: 0xffffee})
+        new THREE.MeshBasicMaterial({color: 0xffffee})
         );
         
         const pointLight = new THREE.PointLight(0xffffff, 1, 10);
@@ -66,7 +67,7 @@
         let initialJumpSpeed = 0;
         let orbitAngle = 0;
         
-        const floorGeometry = new THREE.PlaneGeometry(250, 250);
+        const floorGeometry = new THREE.PlaneGeometry(128, 128);
         const textureLoader = new THREE.TextureLoader();
         const floorMat = new THREE.MeshStandardMaterial({
             roughness: 0.8,
@@ -77,6 +78,7 @@
         const floorMesh = new THREE.Mesh(floorGeometry, floorMat);
         
         textureLoader.load('https://threejs.org/examples/textures/hardwood2_diffuse.jpg', function(map) {
+            // Impostazioni della texture
             map.wrapS = THREE.RepeatWrapping;
             map.wrapT = THREE.RepeatWrapping;
             map.anisotropy = 4;
@@ -86,7 +88,14 @@
             floorMat.needsUpdate = true;
             floorMesh.rotation.x = -Math.PI / 2.0;
             floorMesh.receiveShadow = true;
-            scene.add(floorMesh);
+        });
+        const envMapLoader = new THREE.TextureLoader();
+        envMapLoader.load('/Image/alps_field_4k.jpg', function(envMap) {
+            envMap.mapping = THREE.EquirectangularReflectionMapping;
+            scene.background = envMap; 
+            sphereMaterial.envMap = envMap;
+            sphereMaterial.envMapIntensity = 1; 
+            sphereMaterial.needsUpdate = true;
         });
         
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -159,9 +168,10 @@
                 sphereMaterial.bumpMap = null;
                 sphereMaterial.needsUpdate = true;
             },
-            metalness: 0.5,
+            metalness: 0,
             opacity: 1.0, 
             sphereScale: 1.0, 
+            roughness: 0,
             
             setOpacity: function(value) {
                 sphereMaterial.opacity = value;
@@ -182,13 +192,16 @@
         sphereFolder.add(sphereControls, 'removeBumpTexture').name('Remove Bump Texture');
         sphereFolder.add(sphereControls, 'metalness', 0, 1).step(0.01).onChange(function(value) {
             sphereMaterial.metalness = value;
-        }).name('Sphere Metalness');
+        }).name('Metalness');
+        sphereFolder.add(sphereControls, 'roughness', 0, 1).step(0.01).onChange(function(value) {
+            sphereMaterial.roughness = value;
+        }).name('Roughness');
         sphereFolder.add(sphereControls, 'opacity', 0, 1).step(0.01).onChange(function(value) {
             sphereControls.setOpacity(value);
-        }).name('Sphere Opacity');
+        }).name('Opacity');
         sphereFolder.add(sphereControls, 'sphereScale', 0.1, 2).step(0.1).onChange(function(value) {
             sphereControls.updateSphereScale(value);
-        }).name('Sphere Scale');
+        }).name('Scale');
         
         
         // Add floor controls 
